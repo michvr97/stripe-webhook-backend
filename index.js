@@ -11,15 +11,13 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Initialize Stripe with your live key
-const stripe = new 
-Stripe(process.env.STRIPE_SECRET_KEY, {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16',
 });
 
 // Load Firebase service account JSON
 const serviceAccount = JSON.parse(
-  fs.readFileSync(process.env.FIREBASE_CONFIG_PATH || 
-'./firebase-service-account.json', 'utf8')
+  fs.readFileSync(process.env.FIREBASE_CONFIG_PATH || './firebase-service-account.json', 'utf8')
 );
 
 // Initialize Firebase Admin
@@ -27,6 +25,7 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
+// Use body-parser middleware for JSON parsing
 app.use(bodyParser.json());
 
 // Simple test route
@@ -37,7 +36,6 @@ app.get('/', (req, res) => {
 // Stripe webhook route
 app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature'];
-
   let event;
 
   try {
@@ -56,10 +54,15 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     }).then(() => {
       console.log('Payment count incremented');
     }).catch((error) => {
-      console.error('Error updating Firestore:', error);
+      console.error('Failed to increment counter:', error);
     });
   }
 
-  res.status(200).json({ received: true });
+  res.status(200).send('Received');
+});
+
+// Start the server
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
 
