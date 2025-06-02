@@ -10,58 +10,73 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Initialize Stripe with your live key
+// Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16',
 });
 
-// Load Firebase service account JSON
+// Load Firebase service account
 const serviceAccount = JSON.parse(
-  fs.readFileSync(process.env.FIREBASE_CONFIG_PATH || './firebase-service-account.json', 'utf8')
+  fs.readFileSync(
+    process.env.FIREBASE_CONFIG_PATH || './firebase-service-account.json',
+    'utf8'
+  )
 );
 
-// Initialize Firebase Admin
+// Initialize Firebase
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// Use body-parser middleware for JSON parsing
 app.use(bodyParser.json());
 
-// Simple test route
+// Health check route
 app.get('/', (req, res) => {
   res.send('Stripe webhook backend is live!');
 });
 
-// Stripe webhook route
-app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
+// Webhook handler
+app.post(
+  '/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const sig = req.headers['stripe-signature'];
 
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error('Webhook signature verification failed:', err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Handle checkout.session.completed
+    if (event.type === 'checkout.session.completed') {
+      const db = admin.firestore();
+      const counterRef = db.collection('stats').doc('live');
+
+      counterRef
+        .update({
+          total: admin.firestore.FieldValue.increment(1),
+        })
+        .then(() => {
+          console.log('🔥 Payment count incremented!');
+          res.status(200).send();
+        })
+        .catch((error) => {
+          console.error('❌ Error incrementing counter:', error);
+          res.status(500).send();
+        });
+    } else {
+      res.status(200).send(); // Handle other event types gracefully
+    }
   }
+);
 
-  if (event.type === 'checkout.session.completed') {
-    const db = admin.firestore();
-    const counterRef = db.collection('stats').doc('payments');
-
-    counterRef.update({
-      count: admin.firestore.FieldValue.increment(1)
-    }).then(() => {
-      console.log('Payment count incremented');
-    }).catch((error) => {
-      console.error('Failed to increment counter:', error);
-    });
-  }
-
-  res.status(200).send('Received');
-});
-
-// Start the server
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
