@@ -35,37 +35,31 @@ app.get('/', (req, res) => {
 });
 
 // Stripe webhook route
-app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) 
-=> {
+app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = 'whsec_CcJHqVUsDYbdAJ6YRkljhLLxnQh4YfBA';
+
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('Webhook error:', err.message);
+    console.error('Webhook signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  if (event.type === 'payment_intent.succeeded') {
+  if (event.type === 'checkout.session.completed') {
     const db = admin.firestore();
-    const counterRef = db.collection('config').doc('counter');
+    const counterRef = db.collection('stats').doc('payments');
 
     counterRef.update({
-      count: admin.firestore.FieldValue.increment(1),
+      count: admin.firestore.FieldValue.increment(1)
     }).then(() => {
-      console.log('✅ Counter incremented!');
+      console.log('Payment count incremented');
     }).catch((error) => {
-      console.error('❌ Error updating counter:', error);
+      console.error('Error updating Firestore:', error);
     });
   }
 
   res.status(200).json({ received: true });
-});
-
-// Start server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
 });
 
