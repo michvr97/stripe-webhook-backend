@@ -10,18 +10,32 @@ import { v4 as uuidv4 } from 'uuid';
 dotenv.config();
 
 const app = express();
-
-// ✅ Middlewares for all non-webhook routes
-app.use(cors());
-app.options('*', cors());
-app.use(bodyParser.json());
-
 const port = process.env.PORT || 3000;
 
+// ✅ CORS: Only allow your frontend domain
+const allowedOrigins = ['https://payadollartoseehowmanypeoplepaidadollar.com'];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
+
+app.options('*', cors()); // handle preflight
+
+// ✅ Parse JSON (after raw webhook middleware)
+app.use(bodyParser.json());
+
+// ✅ Stripe setup
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16',
 });
 
+// ✅ Firebase setup
 const serviceAccount = JSON.parse(
   fs.readFileSync(process.env.FIREBASE_CONFIG_PATH || './firebase-service-account.json', 'utf8')
 );
@@ -32,7 +46,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// ✅ Webhook route must use raw body (before bodyParser!)
+// ✅ Webhook route uses raw body
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -59,7 +73,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   res.json({ received: true });
 });
 
-// ✅ Create checkout session (uses normal bodyParser)
+// ✅ Create checkout session
 app.post('/create-checkout-session', async (req, res) => {
   const token = uuidv4();
 
@@ -94,6 +108,7 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
+// ✅ Simple health check
 app.get('/', (req, res) => {
   res.send('Stripe webhook backend is live!');
 });
