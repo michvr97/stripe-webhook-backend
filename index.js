@@ -1,20 +1,27 @@
 import express from 'express';
 import Stripe from 'stripe';
 import dotenv from 'dotenv';
+import cors from 'cors';
+import bodyParser from 'body-parser';
 import admin from 'firebase-admin';
 import fs from 'fs';
-import bodyParser from 'body-parser';
+import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
 const app = express();
+
+// ✅ Middlewares for all non-webhook routes
+app.use(cors());
+app.options('*', cors());
+app.use(bodyParser.json());
+
 const port = process.env.PORT || 3000;
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16',
 });
 
-// Load Firebase service account JSON
 const serviceAccount = JSON.parse(
   fs.readFileSync(process.env.FIREBASE_CONFIG_PATH || './firebase-service-account.json', 'utf8')
 );
@@ -23,43 +30,74 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// 👇 must be raw body BEFORE bodyParser.json
-app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+const db = admin.firestore();
+
+// ✅ Webhook route must use raw body (before bodyParser!)
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
+    console.error('❌ Webhook signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   if (event.type === 'checkout.session.completed') {
-    const db = admin.firestore();
-    const counterRef = db.collection('stats').doc('live'); // <- match Firestore
-
-    counterRef.update({
-      total: admin.firestore.FieldValue.increment(1),
-    }).then(() => {
+    const counterRef = db.collection('stats').doc('live');
+    try {
+      await counterRef.update({
+        total: admin.firestore.FieldValue.increment(1),
+      });
       console.log('💰 Payment received, Firestore updated');
-    }).catch((error) => {
-      console.error('Firestore update failed:', error);
-    });
+    } catch (error) {
+      console.error('❌ Firestore update failed:', error);
+    }
   }
 
   res.json({ received: true });
 });
 
-// 👇 only AFTER the webhook route
-app.use(bodyParser.json());
+// ✅ Create checkout session (uses normal bodyParser)
+app.post('/create-checkout-session', async (req, res) => {
+  const token = uuidv4();
 
-// Optional test route
+  await db.collection('accessTokens').doc(token).set({
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: 'Curiosity Counter Access',
+            },
+            unit_amount: 100,
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `https://payadollartoseehowmanypeoplepaidadollar.com/thankyou.html?token=${token}`,
+      cancel_url: `https://payadollartoseehowmanypeoplepaidadollar.com`,
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('❌ Failed to create checkout session:', err);
+    res.status(500).json({ error: 'Failed to create session' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('Stripe webhook backend is live!');
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`🚀 Server is running on port ${port}`);
 });
-
