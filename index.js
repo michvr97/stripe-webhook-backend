@@ -12,16 +12,12 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-
-// Stripe setup
+// ✅ Stripe setup
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16',
 });
 
-// Firebase setup
+// ✅ Firebase setup
 const serviceAccount = JSON.parse(
   fs.readFileSync(process.env.FIREBASE_CONFIG_PATH || './firebase-service-account.json', 'utf8')
 );
@@ -32,7 +28,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// Webhook (must use raw body)
+// ✅ Webhook route (MUST come before any middleware that reads body)
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -59,7 +55,11 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   res.json({ received: true });
 });
 
-// Create checkout session
+// ✅ Apply middleware AFTER webhook
+app.use(cors());
+app.use(bodyParser.json());
+
+// ✅ Create checkout session
 app.post('/create-checkout-session', async (req, res) => {
   const token = uuidv4();
 
@@ -94,7 +94,7 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// Health check
+// ✅ Health check
 app.get('/', (req, res) => {
   res.send('Stripe webhook backend is live!');
 });
