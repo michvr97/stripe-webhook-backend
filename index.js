@@ -96,6 +96,7 @@ app.post('/create-checkout-session', async (req, res) => {
 
 // ✅ Health check
 app.get('/', (req, res) => {
+  console.log('📡 Ping received on /');
   res.send('Stripe webhook backend is live!');
 });
 
